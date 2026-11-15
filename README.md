@@ -88,7 +88,7 @@ N:MODE는 이러한 문제를 해결하기 위해 **활동 중심의 사용자 �
 ### Installation Steps
 
 1. Pleos Automotive 에뮬레이터를 실행합니다.
-2. 저장소의 `apk/NMODE-release.apk`를 다운로드합니다.
+2. 저장소의 `apk/김가람_NMODE_release.apk`를 다운로드합니다.
 3. ADB를 이용해 APK를 설치합니다.
 
 ```bash
