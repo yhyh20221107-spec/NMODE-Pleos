@@ -13,6 +13,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -32,10 +38,10 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private val Blue = Color(0xFFE7E8EB) // neutral accent (buttons and selected states)
+private val Blue = Color(0xFFC4B0F5) // neutral accent (buttons and selected states)
 private val Dark = Color(0xFFF5F5F6) // primary text
 private val Background = Color(0xFF101114) // charcoal canvas
-private val CardBg = Color(0xFF1B1D21)
+private val CardBg = Color(0xFF1B1D22)
 private val Raised = Color(0xFF27292E)
 private val Muted = Color(0xFFA8ABB2)
 private val Amber = Color(0xFFE6B98A)
@@ -54,6 +60,11 @@ data class Mode(
     val lightBrightness: Int = 45,
     val lightColor: String = "Warm",
     val audio: String = "잔잔한 음악",
+    val windowPercent: Int = 20,
+    val wheelHeatOn: Boolean = true,
+    val defrostOn: Boolean = true,
+    val airPurifyOn: Boolean = true,
+    val seatPosition: String = "기본",
     val isTemplate: Boolean = false
 )
 
@@ -67,12 +78,12 @@ private val settingLabels = linkedMapOf(
 )
 
 private fun templates() = listOf(
-    Mode(name = "휴식", category = "휴식", enabled = setOf("temperature", "fan", "ambient", "audio", "seatPosition"), temperature = 23, fan = 1, lightBrightness = 25, audio = "휴식 음악", isTemplate = true),
+    Mode(name = "휴식", category = "휴식", enabled = setOf("temperature", "fan", "ambient", "audio", "seatPosition"), temperature = 23, fan = 1, lightBrightness = 25, audio = "휴식 음악", seatPosition = "휴식", isTemplate = true),
     Mode(name = "집중", category = "집중", enabled = setOf("temperature", "fan", "ambient", "audio"), temperature = 22, fan = 1, lightBrightness = 60, audio = "집중 음악", isTemplate = true),
-    Mode(name = "대기", category = "대기", enabled = setOf("temperature", "seatHeat", "seatVent", "ambient", "audio"), temperature = 23, seatHeat = 1, lightBrightness = 30, isTemplate = true),
+    Mode(name = "대기", category = "대기", enabled = setOf("temperature", "ambient", "audio"), temperature = 23, seatHeat = 1, lightBrightness = 30, isTemplate = true),
     Mode(name = "환기", category = "환기", enabled = setOf("window", "fan", "temperature"), fan = 3, isTemplate = true),
-    Mode(name = "겨울철 쾌적", category = "계절", enabled = setOf("temperature", "fan", "seatHeat", "wheelHeat", "defrost"), temperature = 25, fan = 3, seatHeat = 2, isTemplate = true),
-    Mode(name = "여름철 쾌적", category = "계절", enabled = setOf("temperature", "fan", "seatVent", "airPurify"), temperature = 21, fan = 3, seatVent = 2, isTemplate = true)
+    Mode(name = "겨울", category = "계절", enabled = setOf("temperature", "fan", "seatHeat", "wheelHeat", "defrost"), temperature = 25, fan = 3, seatHeat = 2, isTemplate = true),
+    Mode(name = "여름", category = "계절", enabled = setOf("temperature", "fan", "seatVent", "airPurify"), temperature = 21, fan = 3, seatVent = 2, isTemplate = true)
 )
 
 private fun Mode.toJson() = JSONObject().apply {
@@ -81,6 +92,9 @@ private fun Mode.toJson() = JSONObject().apply {
     put("fan", fan); put("seatHeat", seatHeat); put("seatVent", seatVent)
     put("lightBrightness", lightBrightness); put("lightColor", lightColor)
     put("audio", audio); put("isTemplate", isTemplate)
+    put("windowPercent", windowPercent); put("wheelHeatOn", wheelHeatOn)
+    put("defrostOn", defrostOn); put("airPurifyOn", airPurifyOn)
+    put("seatPosition", seatPosition)
 }
 
 private fun modeFromJson(j: JSONObject): Mode {
@@ -95,6 +109,11 @@ private fun modeFromJson(j: JSONObject): Mode {
         lightBrightness = j.optInt("lightBrightness", 45),
         lightColor = j.optString("lightColor", "Warm"),
         audio = j.optString("audio", "음악"),
+        windowPercent = j.optInt("windowPercent", 20),
+        wheelHeatOn = j.optBoolean("wheelHeatOn", true),
+        defrostOn = j.optBoolean("defrostOn", true),
+        airPurifyOn = j.optBoolean("airPurifyOn", true),
+        seatPosition = j.optString("seatPosition", "기본"),
         isTemplate = j.optBoolean("isTemplate", false)
     )
 }
@@ -270,318 +289,312 @@ class MainActivity : ComponentActivity() {
         setContent {
             var modes by remember {
                 mutableStateOf(runCatching {
-                    val a = JSONArray(prefs.getString("modes", "") ?: "")
-                    (0 until a.length()).map { modeFromJson(a.getJSONObject(it)) }
+                    val raw = prefs.getString("modes", null)
+                    if (raw.isNullOrBlank()) templates() else {
+                        val array = JSONArray(raw)
+                        val saved = (0 until array.length()).map { modeFromJson(array.getJSONObject(it)) }
+                        val presetNames = listOf("휴식", "집중", "대기", "환기", "겨울", "여름")
+                        val savedPresets = saved.filter { it.isTemplate }
+                        val normalized = savedPresets.map { mode ->
+                            when (mode.name) {
+                                "겨울철 쾌적" -> mode.copy(name = "겨울")
+                                "여름철 쾌적" -> mode.copy(name = "여름")
+                                else -> mode
+                            }
+                        }
+                        val missing = templates().filter { t ->
+                            normalized.none { it.name == t.name }
+                        }
+                        val organized = (normalized + missing).sortedBy { presetNames.indexOf(it.name).let { i -> if (i < 0) 99 else i } }
+                        organized + saved.filterNot { it.isTemplate }
+                    }
                 }.getOrElse { templates() })
             }
             fun save(list: List<Mode>) {
                 modes = list
                 prefs.edit().putString("modes", JSONArray(list.map { it.toJson() }).toString()).apply()
             }
-            var screen by remember { mutableStateOf("모드") }
+
+            // viewingId: currently inspected mode; activeId: explicitly chosen simulated mode.
+            var viewingId by remember { mutableStateOf(modes.firstOrNull()?.id) }
+            var activeId by remember { mutableStateOf(prefs.getString("active_mode_id", null)) }
+            var chooseTarget by remember { mutableStateOf<Mode?>(null) }
             var editing by remember { mutableStateOf<Mode?>(null) }
-            var selected by remember { mutableStateOf<Mode?>(null) }
+            var editorOriginal by remember { mutableStateOf<Mode?>(null) }
+            var showPreview by remember { mutableStateOf(false) }
+            var deleteTarget by remember { mutableStateOf<Mode?>(null) }
+            var editorDiscard by remember { mutableStateOf(false) }
+            var toast by remember { mutableStateOf("") }
             var seat by remember { mutableStateOf(SeatValue.ROW_1_LEFT) }
             val fields = remember { mutableStateMapOf<String, String>() }
             var updatedAt by remember { mutableStateOf("조회 전") }
             var requestId by remember { mutableIntStateOf(0) }
+
             fun refresh() {
                 requestId += 1
                 val thisRequest = requestId
                 updatedAt = SimpleDateFormat("HH:mm:ss", Locale.KOREA).format(Date())
                 fields.clear()
                 listOf("현재 온도", "송풍 세기", "에어컨", "자동 공조").forEach { fields[it] = "조회 중" }
-                readVehicleClimate(seat) { key, result ->
-                    if (thisRequest == requestId) fields[key] = result
+                readVehicleClimate(seat) { key, value ->
+                    if (thisRequest == requestId) fields[key] = value
                 }
             }
-            fun openEditor(mode: Mode) {
-                editing = if (mode.isTemplate) mode.copy(
+            fun openNew(mode: Mode, original: Mode? = null) {
+                editorOriginal = original
+                editing = mode
+                showPreview = false
+            }
+            fun duplicate(mode: Mode) {
+                val copied = mode.copy(
                     id = UUID.randomUUID().toString(),
-                    name = "${mode.name} 맞춤",
-                    category = "사용자", isTemplate = false
-                ) else mode
+                    name = generateSequence("${mode.name} 복사본", { "$it 복사" }).first { candidate ->
+                        modes.none { it.name.equals(candidate, ignoreCase = true) }
+                    }, category = "사용자", isTemplate = false
+                )
+                save(modes + copied)
+                viewingId = copied.id
+                showPreview = false
+                toast = "모드를 복제했습니다"
             }
-            fun preview(mode: Mode) {
-                selected = mode
-                screen = "미리보기"
-                refresh()
-            }
-            MaterialTheme(
-                colorScheme = darkColorScheme(
-                    primary = Blue,
-                    onPrimary = Background,
-                    background = Background,
-                    onBackground = Dark,
-                    surface = CardBg,
-                    onSurface = Dark,
-                    surfaceVariant = Raised,
-                    onSurfaceVariant = Muted,
-                    outline = Color(0xFF44464C)
+            val selected = modes.firstOrNull { it.id == viewingId } ?: modes.firstOrNull()
+
+            // Scale N:MODE content only on QHD Automotive displays.
+            // The Pleos system bars and other system UI are not affected.
+            val originalDensity = LocalDensity.current
+            val screenWidthDp = LocalConfiguration.current.screenWidthDp
+            val uiScale = if (screenWidthDp >= 2200) 1.65f else 1f
+            CompositionLocalProvider(
+                LocalDensity provides Density(
+                    density = originalDensity.density * uiScale,
+                    fontScale = originalDensity.fontScale
                 )
             ) {
-                Surface(Modifier.fillMaxSize(), color = Background) {
-                    Column(Modifier.fillMaxSize().padding(horizontal = 22.dp, vertical = 15.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text("N:MODE", color = Dark, fontSize = 27.sp,
-                                    fontWeight = FontWeight.SemiBold, letterSpacing = 0.3.sp)
-                            }
-                            Text("VEHICLE MODES", color = Muted,
-                                style = MaterialTheme.typography.labelSmall, letterSpacing = 1.sp)
-                        }
-                        Spacer(Modifier.height(15.dp))
-                        if (editing != null) {
-                            EditorScreen(
-                                initial = editing!!,
-                                onCancel = { editing = null },
-                                onSave = { updated ->
-                                    val safe = updated.copy(isTemplate = false, category = "사용자")
-                                    val i = modes.indexOfFirst { it.id == safe.id }
-                                    save(if (i >= 0) modes.toMutableList().also { it[i] = safe } else modes + safe)
-                                    editing = null
+                MaterialTheme(colorScheme = darkColorScheme(
+                    primary = Blue, onPrimary = Color(0xFF17131D),
+                    background = Background, onBackground = Dark,
+                    surface = CardBg, onSurface = Dark,
+                    surfaceVariant = Raised, onSurfaceVariant = Muted,
+                    outline = Color(0xFF42434A)
+                )) {
+                    Surface(Modifier.fillMaxSize(), color = Background) {
+                        Row(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                            // 25% mode list, 75% detail; account for inter-panel gap.
+                            ModeSidebar(
+                                modes = modes, selectedId = selected?.id,
+                                modifier = Modifier.weight(1f).fillMaxHeight(),
+                                onSelect = { mode -> viewingId = mode.id; editing = null; showPreview = false; toast = "" },
+                                onNew = {
+                                    openNew(Mode(name = "", category = "사용자", enabled = setOf("temperature", "fan")))
                                 }
                             )
-                        } else {
-                            Row(verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                                listOf("모드", "차량 상태").forEach { tab ->
-                                    FilterChip(selected = screen == tab, onClick = { screen = tab }, label = { Text(tab) })
-                                }
-                                if (screen == "미리보기") {
-                                    FilterChip(selected = true, onClick = { screen = "모드" }, label = { Text("미리보기") })
-                                }
-                                Spacer(Modifier.weight(1f))
-                                if (screen == "모드") {
-                                    Button(onClick = {
-                                        editing = Mode(name = "나만의 모드", category = "사용자", enabled = setOf("temperature", "fan"))
-                                    }) { Text("+ 모드 만들기") }
-                                } else if (screen == "차량 상태") {
-                                    Button(onClick = { refresh() }) { Text("상태 새로고침") }
+                            Surface(
+                                modifier = Modifier.weight(3f).fillMaxHeight(),
+                                color = CardBg, shape = RoundedCornerShape(18.dp)
+                            ) {
+                                Column(Modifier.fillMaxSize().padding(22.dp)) {
+                                    if (editing != null) {
+                                        ModeEditorV5(
+                                            initial = editing!!,
+                                            existingNames = modes.filter { it.id != editing!!.id }.map { it.name },
+                                            onCancel = { changed ->
+                                                if (changed) editorDiscard = true else editing = null
+                                            },
+                                            onSave = { newMode ->
+                                                val safe = newMode.copy(name = newMode.name.trim(), category = "사용자", isTemplate = false)
+                                                val index = modes.indexOfFirst { it.id == safe.id }
+                                                save(if (index < 0) modes + safe else modes.toMutableList().also { it[index] = safe })
+                                                viewingId = safe.id
+                                                editing = null
+                                                editorOriginal = null
+                                                toast = "모드를 저장했습니다"
+                                            }
+                                        )
+                                    } else if (selected == null) {
+                                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                            Text("모드를 만들어 주세요", color = Muted)
+                                        }
+                                    } else if (showPreview) {
+                                        ModePreviewV5(mode = selected, fields = fields, lastUpdated = updatedAt,
+                                            seat = seat, onSeat = { seat = it; refresh() },
+                                            onBack = { showPreview = false }, onRefresh = { refresh() })
+                                    } else {
+                                        ModeDetailV5(
+                                            mode = selected, message = toast,
+                                            isActive = selected.id == activeId,
+                                            onChoose = { chooseTarget = selected },
+                                            onPreview = { showPreview = true; refresh() },
+                                            onEdit = {
+                                                if (selected.isTemplate) {
+                                                    openNew(selected.copy(
+                                                        id = UUID.randomUUID().toString(),
+                                                        name = "${selected.name} 맞춤",
+                                                        isTemplate = false, category = "사용자"
+                                                    ))
+                                                } else openNew(selected, selected)
+                                            },
+                                            onDuplicate = { duplicate(selected) },
+                                            onDelete = { deleteTarget = selected }
+                                        )
+                                    }
                                 }
                             }
-                            Spacer(Modifier.height(12.dp))
-                            when (screen) {
-                                "모드" -> ModesScreen(modes,
-                                    onPreview = { preview(it) },
-                                    onEdit = { openEditor(it) },
-                                    onDuplicate = {
-                                        editing = it.copy(id = UUID.randomUUID().toString(),
-                                            name = it.name + " 복사본", isTemplate = false, category = "사용자")
-                                    },
-                                    onDelete = { target -> save(modes.filterNot { it.id == target.id }) }
-                                )
-                                "차량 상태" -> VehicleScreen(fields, updatedAt, seat,
-                                    onSeat = { seat = it; refresh() }, onRefresh = { refresh() })
-                                else -> PreviewScreen(selected, fields,
-                                    onBack = { screen = "모드" }, onRefresh = { refresh() },
-                                    onEdit = { selected?.let { openEditor(it) } })
-                            }
+                        }
+                        if (chooseTarget != null) {
+                            AlertDialog(
+                                onDismissRequest = { chooseTarget = null },
+                                title = { Text("모드 선택") },
+                                text = { Text("'${chooseTarget?.name}' 모드를 사용할 모드로 선택할까요?\n현재 버전에서는 선택 상태만 변경되며 차량 설정은 바뀌지 않습니다.") },
+                                confirmButton = {
+                                    TextButton(onClick = {
+                                        val target = chooseTarget!!
+                                        activeId = target.id
+                                        prefs.edit()
+                                            .putString("modes", JSONArray(modes.map { it.toJson() }).toString())
+                                            .putString("active_mode_id", target.id).apply()
+                                        chooseTarget = null
+                                        toast = "모드를 선택했습니다 · 차량 제어 없음"
+                                    }) { Text("선택") }
+                                },
+                                dismissButton = { TextButton(onClick = { chooseTarget = null }) { Text("취소", fontSize = 18.sp) } }
+                            )
+                        }
+                        if (deleteTarget != null) {
+                            AlertDialog(
+                                onDismissRequest = { deleteTarget = null },
+                                title = { Text("모드 삭제") },
+                                text = { Text("'${deleteTarget?.name}' 모드를 삭제할까요? 이 작업은 되돌릴 수 없습니다.") },
+                                confirmButton = {
+                                    TextButton(onClick = {
+                                        val target = deleteTarget!!
+                                        save(modes.filterNot { it.id == target.id })
+                                        viewingId = modes.firstOrNull { it.id != target.id }?.id
+                                        if (activeId == target.id) {
+                                            activeId = null
+                                            prefs.edit().remove("active_mode_id").apply()
+                                        }
+                                        deleteTarget = null
+                                        toast = "모드를 삭제했습니다"
+                                    }) { Text("삭제", fontSize = 19.sp) }
+                                },
+                                dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text("취소", fontSize = 18.sp) } }
+                            )
+                        }
+                        if (editorDiscard) {
+                            AlertDialog(
+                                onDismissRequest = { editorDiscard = false },
+                                title = { Text("변경사항 취소") },
+                                text = { Text("저장하지 않은 변경사항을 버릴까요?") },
+                                confirmButton = { TextButton(onClick = { editing = null; editorDiscard = false }) { Text("버리기") } },
+                                dismissButton = { TextButton(onClick = { editorDiscard = false }) { Text("계속 편집") } }
+                            )
                         }
                     }
                 }
+            } // End QHD-only UI scale
+        }
+    }
+}
+
+@Composable
+private fun ModeSidebar(modes: List<Mode>, selectedId: String?, modifier: Modifier, onSelect: (Mode) -> Unit, onNew: () -> Unit) {
+    Surface(modifier, color = Color(0xFF17181C), shape = RoundedCornerShape(18.dp)) {
+        Column(Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 18.dp)) {
+            Text("N:MODE", color = Dark, fontSize = 33.sp, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(start = 9.dp, bottom = 26.dp))
+            LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                item { Text("기본 모드", color = Muted, fontSize = 16.sp,
+                    modifier = Modifier.padding(start = 12.dp, bottom = 10.dp)) }
+                items(modes.filter { it.isTemplate }, key = { it.id }) { mode ->
+                    ModeNavRow(mode, selectedId == mode.id) { onSelect(mode) }
+                }
+                item { HorizontalDivider(Modifier.padding(vertical = 13.dp), color = Color(0xFF37383D)) }
+                item { Text("내 모드", color = Muted, fontSize = 16.sp,
+                    modifier = Modifier.padding(start = 12.dp, bottom = 10.dp)) }
+                if (modes.none { !it.isTemplate }) item {
+                    Text("아직 저장한 모드가 없습니다", color = Muted, fontSize = 15.sp,
+                        modifier = Modifier.padding(12.dp))
+                }
+                items(modes.filterNot { it.isTemplate }, key = { it.id }) { mode ->
+                    ModeNavRow(mode, selectedId == mode.id) { onSelect(mode) }
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            OutlinedButton(onClick = onNew, modifier = Modifier.fillMaxWidth().height(72.dp),
+                shape = RoundedCornerShape(12.dp)) {
+                Text("+ 새 모드", fontWeight = FontWeight.Medium, fontSize = 20.sp)
             }
         }
     }
 }
 
 @Composable
-private fun ModesScreen(
-    modes: List<Mode>,
-    onPreview: (Mode) -> Unit,
-    onEdit: (Mode) -> Unit,
-    onDuplicate: (Mode) -> Unit,
-    onDelete: (Mode) -> Unit
-) {
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item { Text("추천 모드", color = Dark, style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold) }
-        val presets = modes.filter { it.isTemplate }
-        items(presets.chunked(2)) { pair ->
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                pair.forEach { mode ->
-                    Box(Modifier.weight(1f)) {
-                        ModeTile(mode, onPreview = { onPreview(mode) }, onEdit = { onEdit(mode) },
-                            onDuplicate = { onDuplicate(mode) }, onDelete = { onDelete(mode) })
-                    }
-                }
-                if (pair.size == 1) Spacer(Modifier.weight(1f))
-            }
-        }
-        item {
-            Spacer(Modifier.height(5.dp))
-            Text("내 모드", color = Dark, style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold)
-        }
-        val custom = modes.filterNot { it.isTemplate }
-        if (custom.isEmpty()) {
-            item {
-                Surface(color = CardBg, shape = RoundedCornerShape(12.dp)) {
-                    Text("저장한 모드가 없습니다.", Modifier.fillMaxWidth().padding(17.dp), color = Muted)
-                }
-            }
-        } else {
-            items(custom.chunked(2)) { pair ->
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    pair.forEach { mode ->
-                        Box(Modifier.weight(1f)) {
-                            ModeTile(mode, onPreview = { onPreview(mode) }, onEdit = { onEdit(mode) },
-                                onDuplicate = { onDuplicate(mode) }, onDelete = { onDelete(mode) })
-                        }
-                    }
-                    if (pair.size == 1) Spacer(Modifier.weight(1f))
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ModeTile(mode: Mode, onPreview: () -> Unit, onEdit: () -> Unit,
-                     onDuplicate: () -> Unit, onDelete: () -> Unit) {
-    Card(shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(containerColor = CardBg)) {
-        Column(Modifier.fillMaxWidth().padding(17.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(mode.name, color = Dark, fontWeight = FontWeight.SemiBold,
-                fontSize = 19.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(mode.enabled.mapNotNull { settingLabels[it] }.take(3).joinToString(" · "),
-                color = Muted, style = MaterialTheme.typography.bodySmall,
+private fun ModeNavRow(mode: Mode, selected: Boolean, onClick: () -> Unit) {
+    Surface(color = if (selected) Color(0xFF3A2B4F) else Color.Transparent,
+        shape = RoundedCornerShape(11.dp),
+        modifier = Modifier.fillMaxWidth().heightIn(min = 78.dp).clickable(onClick = onClick)) {
+        Row(Modifier.padding(horizontal = 20.dp, vertical = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(mode.name, color = Dark, fontSize = 21.sp,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onPreview, modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 7.dp),
-                    shape = RoundedCornerShape(9.dp)) { Text("미리보기") }
-                OutlinedButton(onClick = onEdit, modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 7.dp),
-                    shape = RoundedCornerShape(9.dp)) {
-                    Text(if (mode.isTemplate) "설정" else "편집")
+        }
+    }
+}
+
+@Composable
+private fun ModeDetailV5(mode: Mode, message: String, isActive: Boolean, onChoose: () -> Unit,
+                         onPreview: () -> Unit, onEdit: () -> Unit, onDuplicate: () -> Unit, onDelete: () -> Unit) {
+    Column(Modifier.fillMaxSize()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(mode.name, color = Dark, fontSize = 36.sp, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (isActive) Text("선택됨", color = Blue, fontSize = 18.sp)
+        }
+        Spacer(Modifier.height(18.dp))
+        Surface(Modifier.weight(1f).fillMaxWidth(), color = Raised,
+            shape = RoundedCornerShape(15.dp)) {
+            val ordered = settingLabels.keys.filter { it in mode.enabled }
+            if (ordered.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("활성화된 설정이 없습니다", color = Muted)
+                }
+            } else {
+                LazyColumn(Modifier.fillMaxSize().padding(horizontal = 22.dp, vertical = 8.dp)) {
+                    items(ordered) { key ->
+                        Row(Modifier.fillMaxWidth().heightIn(min = 98.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(settingLabels[key] ?: key, color = Muted, fontSize = 21.sp,
+                                modifier = Modifier.weight(1f))
+                            Text(valueDescription(mode, key), color = Dark, fontSize = 22.sp,
+                                fontWeight = FontWeight.Medium, maxLines = 1,
+                                overflow = TextOverflow.Ellipsis)
+                        }
+                        HorizontalDivider(color = Color(0xFF3A3B40))
+                    }
                 }
             }
+        }
+        if (message.isNotBlank()) {
+            Spacer(Modifier.height(7.dp))
+            Text(message, color = Muted, fontSize = 15.sp)
+        }
+        Spacer(Modifier.height(16.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(9.dp), verticalAlignment = Alignment.CenterVertically) {
+            Button(onClick = onChoose, enabled = !isActive, modifier = Modifier.weight(1.45f).height(78.dp),
+                shape = RoundedCornerShape(11.dp)) { Text(if (isActive) "선택됨" else "이 모드 선택", fontSize = 20.sp) }
+            OutlinedButton(onClick = onPreview, modifier = Modifier.weight(1.1f).height(78.dp),
+                shape = RoundedCornerShape(11.dp)) { Text("미리보기", fontSize = 19.sp) }
+            OutlinedButton(onClick = onEdit, modifier = Modifier.weight(.9f).height(78.dp),
+                shape = RoundedCornerShape(11.dp)) { Text("수정", fontSize = 19.sp) }
+            OutlinedButton(onClick = onDuplicate, modifier = Modifier.weight(.9f).height(78.dp),
+                shape = RoundedCornerShape(11.dp)) { Text("복제", fontSize = 19.sp) }
             if (!mode.isTemplate) {
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    TextButton(onClick = onDuplicate) { Text("복제") }
-                    TextButton(onClick = onDelete) { Text("삭제", color = Muted) }
-                }
+                OutlinedButton(onClick = onDelete, modifier = Modifier.weight(.9f).height(78.dp),
+                    shape = RoundedCornerShape(11.dp)) { Text("삭제", fontSize = 19.sp) }
             }
         }
-    }
-}
-
-@Composable
-private fun VehicleScreen(fields: Map<String, String>, lastUpdated: String, seat: SeatValue,
-                          onSeat: (SeatValue) -> Unit, onRefresh: () -> Unit) {
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item {
-            Surface(color = CardBg, shape = RoundedCornerShape(14.dp)) {
-                Column(Modifier.fillMaxWidth().padding(19.dp)) {
-                    Text("현재 차량 환경", color = Dark, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
-                    Text("실시간 조회", color = Muted, style = MaterialTheme.typography.bodySmall)
-                    Spacer(Modifier.height(14.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        DarkMetric("실내 온도", fields["현재 온도"] ?: "조회 전", Modifier.weight(1f))
-                        DarkMetric("송풍 세기", fields["송풍 세기"]?.substringBefore(" · ") ?: "조회 전", Modifier.weight(1f))
-                    }
-                }
-            }
-        }
-        item {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("조회 기준", color = Muted, style = MaterialTheme.typography.bodySmall)
-                Spacer(Modifier.width(9.dp))
-                FilterChip(selected = seat == SeatValue.ROW_1_LEFT,
-                    onClick = { onSeat(SeatValue.ROW_1_LEFT) }, label = { Text("1열 왼쪽") })
-                Spacer(Modifier.width(6.dp))
-                FilterChip(selected = seat == SeatValue.ROW_1_RIGHT,
-                    onClick = { onSeat(SeatValue.ROW_1_RIGHT) }, label = { Text("1열 오른쪽") })
-                Spacer(Modifier.weight(1f))
-                Text("최근 조회 $lastUpdated", color = Muted, style = MaterialTheme.typography.bodySmall)
-            }
-        }
-        items(listOf("현재 온도", "송풍 세기", "에어컨", "자동 공조")) { label ->
-            DataRow(label, fields[label] ?: "조회 전")
-        }
-        if (fields.containsKey("상태")) item { DataRow("SDK 상태", fields["상태"] ?: "") }
-    }
-}
-
-@Composable
-private fun DarkMetric(title: String, value: String, modifier: Modifier = Modifier) {
-    Column(modifier) {
-        Text(title, color = Muted, style = MaterialTheme.typography.labelMedium)
-        Spacer(Modifier.height(4.dp))
-        Text(value, color = Dark, fontSize = 19.sp, fontWeight = FontWeight.Bold,
-            maxLines = 1, overflow = TextOverflow.Ellipsis)
-    }
-}
-
-@Composable
-private fun DataRow(label: String, value: String) {
-    Surface(color = CardBg, shape = RoundedCornerShape(12.dp)) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically) {
-            Text(label, modifier = Modifier.width(112.dp), color = Muted, fontWeight = FontWeight.Medium)
-            Text(value.substringBefore(" · "), modifier = Modifier.weight(1f),
-                color = if (value.contains("실패") || value.contains("없음")) Amber else Dark,
-                fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        }
-    }
-}
-
-@Composable
-private fun PreviewScreen(mode: Mode?, fields: Map<String, String>,
-                          onBack: () -> Unit, onRefresh: () -> Unit, onEdit: () -> Unit) {
-    if (mode == null) { Text("선택한 모드가 없습니다."); return }
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("${mode.name} · 적용 미리보기", fontSize = 21.sp,
-                        fontWeight = FontWeight.Bold, color = Dark)
-                }
-                OutlinedButton(onClick = onBack) { Text("모드 목록") }
-                Spacer(Modifier.width(8.dp))
-                OutlinedButton(onClick = onEdit) { Text("설정 편집") }
-            }
-        }
-        item {
-            Surface(color = Raised, shape = RoundedCornerShape(10.dp)) {
-                Text("미리보기 전용 · 차량 설정은 변경되지 않습니다.",
-                    Modifier.fillMaxWidth().padding(13.dp), color = Muted,
-                    style = MaterialTheme.typography.bodySmall)
-            }
-        }
-        item { Text("모드 설정", fontWeight = FontWeight.SemiBold, color = Dark) }
-        items(mode.enabled.toList()) { key ->
-            val current = when (key) {
-                "temperature" -> fields["현재 온도"] ?: "조회 전 (현재 실내온도)"
-                "fan" -> fields["송풍 세기"]?.substringBefore(" · ") ?: "조회 전"
-                "seatHeat", "seatVent", "ambient", "window", "wheelHeat", "defrost", "airPurify", "seatPosition" -> "SDK 미연동"
-                else -> "연동 전"
-            }
-            Surface(color = CardBg, shape = RoundedCornerShape(13.dp)) {
-                Column(Modifier.fillMaxWidth().padding(15.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    Text(settingLabels[key] ?: key, fontWeight = FontWeight.Bold)
-                    Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                        Column(Modifier.weight(1f)) {
-                            Text("모드 목표", color = Muted, style = MaterialTheme.typography.labelSmall)
-                            Text(valueDescription(mode, key), fontWeight = FontWeight.SemiBold)
-                        }
-                        Column(Modifier.weight(1f)) {
-                            Text("차량 조회", color = Muted, style = MaterialTheme.typography.labelSmall)
-                            Text(current, color = Teal, fontWeight = FontWeight.SemiBold,
-                                maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        }
-                    }
-                }
-            }
-        }
-        item {
-            Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                Button(onClick = onRefresh) { Text("차량 상태 다시 조회") }
-                OutlinedButton(onClick = onBack) { Text("다른 모드 선택") }
-            }
-        }
+        Spacer(Modifier.height(6.dp))
+        Text("선택은 앱 안에서만 반영 · 차량 제어 없음", fontSize = 14.sp, color = Muted)
     }
 }
 
@@ -592,59 +605,156 @@ private fun valueDescription(mode: Mode, key: String): String = when (key) {
     "seatVent" -> "${mode.seatVent}단계"
     "ambient" -> "${mode.lightColor} · ${mode.lightBrightness}%"
     "audio" -> mode.audio
-    else -> "모드 포함 · 상세 제어 미연동"
+    "window" -> "${mode.windowPercent}% 열림"
+    "wheelHeat" -> if (mode.wheelHeatOn) "켜짐" else "꺼짐"
+    "defrost" -> if (mode.defrostOn) "켜짐" else "꺼짐"
+    "airPurify" -> if (mode.airPurifyOn) "켜짐" else "꺼짐"
+    "seatPosition" -> mode.seatPosition
+    else -> "설정 포함"
 }
 
 @Composable
-private fun EditorScreen(initial: Mode, onCancel: () -> Unit, onSave: (Mode) -> Unit) {
-    var mode by remember(initial.id) { mutableStateOf(initial) }
-    Column {
+private fun ModePreviewV5(mode: Mode, fields: Map<String, String>, lastUpdated: String,
+                          seat: SeatValue, onSeat: (SeatValue) -> Unit, onBack: () -> Unit, onRefresh: () -> Unit) {
+    Column(Modifier.fillMaxSize()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("모드 설정", fontSize = 21.sp, fontWeight = FontWeight.SemiBold)
-            }
-            TextButton(onClick = onCancel) { Text("취소") }
-            Button(onClick = { onSave(mode) }, enabled = mode.name.isNotBlank()) { Text("저장하기") }
+            Text("${mode.name} · 미리보기", color = Dark, fontSize = 32.sp,
+                fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            TextButton(onClick = onBack) { Text("돌아가기", fontSize = 18.sp) }
         }
-        Spacer(Modifier.height(12.dp))
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            item {
-                Surface(color = CardBg, shape = RoundedCornerShape(13.dp)) {
-                    OutlinedTextField(value = mode.name, onValueChange = { mode = mode.copy(name = it) },
-                        label = { Text("모드 이름") }, singleLine = true,
-                        modifier = Modifier.fillMaxWidth().padding(10.dp))
+        Text("차량 설정은 변경되지 않습니다", color = Muted, fontSize = 17.sp)
+        Spacer(Modifier.height(13.dp))
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("조회 좌석", color = Muted, fontSize = 17.sp)
+            FilterChip(selected = seat == SeatValue.ROW_1_LEFT,
+                onClick = { onSeat(SeatValue.ROW_1_LEFT) }, label = { Text("1열 왼쪽") })
+            FilterChip(selected = seat == SeatValue.ROW_1_RIGHT,
+                onClick = { onSeat(SeatValue.ROW_1_RIGHT) }, label = { Text("1열 오른쪽") })
+            Spacer(Modifier.weight(1f))
+            Text("최근 조회 $lastUpdated", color = Muted, fontSize = 15.sp)
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("설정", color = Muted, modifier = Modifier.weight(1.2f), fontSize = 17.sp)
+            Text("모드 목표", color = Muted, modifier = Modifier.weight(1f), fontSize = 17.sp)
+            Text("차량 조회", color = Muted, modifier = Modifier.weight(1f), fontSize = 17.sp)
+        }
+        Spacer(Modifier.height(8.dp))
+        Surface(Modifier.weight(1f).fillMaxWidth(), color = Raised, shape = RoundedCornerShape(14.dp)) {
+            LazyColumn(Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 5.dp)) {
+                items(settingLabels.keys.filter { it in mode.enabled }) { key ->
+                    val current = when (key) {
+                        "temperature" -> fields["현재 온도"] ?: "조회 전"
+                        "fan" -> fields["송풍 세기"]?.substringBefore(" · ") ?: "조회 전"
+                        else -> "SDK 미연동"
+                    }
+                    Row(Modifier.fillMaxWidth().heightIn(min = 96.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(settingLabels[key] ?: key, color = Muted, modifier = Modifier.weight(1.2f), fontSize = 19.sp)
+                        Text(valueDescription(mode, key), color = Dark, modifier = Modifier.weight(1f), fontSize = 19.sp)
+                        Text(current, color = if (current.contains("실패")) Amber else Teal,
+                            modifier = Modifier.weight(1f), fontSize = 18.sp,
+                            maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    }
+                    HorizontalDivider(color = Color(0xFF3B3C40))
+                }
+                item {
+                    Spacer(Modifier.height(8.dp))
+                    Text("공조 추가 조회", color = Muted, fontSize = 16.sp)
+                    Spacer(Modifier.height(8.dp))
+                    Text("에어컨  ${fields["에어컨"]?.substringBefore(" · ") ?: "조회 전"}", color = Dark)
+                    Spacer(Modifier.height(8.dp))
+                    Text("자동 공조  ${fields["자동 공조"]?.substringBefore(" · ") ?: "조회 전"}", color = Dark)
+                    if (fields.containsKey("상태")) {
+                        Spacer(Modifier.height(8.dp)); Text(fields["상태"].orEmpty(), color = Amber)
+                    }
                 }
             }
+        }
+        Spacer(Modifier.height(13.dp))
+        Button(onClick = onRefresh, modifier = Modifier.fillMaxWidth().height(72.dp),
+            shape = RoundedCornerShape(11.dp)) { Text("차량 상태 새로고침", fontSize = 19.sp) }
+    }
+}
+
+@Composable
+private fun ModeStepper(value: Int, min: Int, max: Int, unit: String, onChange: (Int) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("$value$unit", color = Dark, modifier = Modifier.weight(1f), fontWeight = FontWeight.Medium, fontSize = 21.sp)
+        OutlinedButton(onClick = { onChange((value-1).coerceAtLeast(min)) },
+            enabled = value > min, modifier = Modifier.width(84.dp).height(56.dp)) { Text("−") }
+        Spacer(Modifier.width(8.dp))
+        OutlinedButton(onClick = { onChange((value+1).coerceAtMost(max)) },
+            enabled = value < max, modifier = Modifier.width(84.dp).height(56.dp)) { Text("+") }
+    }
+}
+
+@Composable
+private fun ModeEditorV5(initial: Mode, existingNames: List<String>, onCancel: (Boolean) -> Unit, onSave: (Mode) -> Unit) {
+    var mode by remember(initial.id) { mutableStateOf(initial) }
+    val cleanName = mode.name.trim()
+    val duplicateName = existingNames.any { it.equals(cleanName, ignoreCase = true) }
+    Column(Modifier.fillMaxSize()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(if (initial.name.isBlank()) "새 모드" else "모드 편집", color = Dark,
+                fontSize = 32.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            TextButton(onClick = { onCancel(mode != initial) }) { Text("취소", fontSize = 18.sp) }
+            Spacer(Modifier.width(8.dp))
+            Button(onClick = { onSave(mode) }, enabled = cleanName.isNotEmpty() && !duplicateName,
+                shape = RoundedCornerShape(10.dp)) { Text("저장", fontSize = 19.sp) }
+        }
+        if (duplicateName) Text("이미 사용 중인 모드 이름입니다", color = Amber, fontSize = 16.sp)
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(value = mode.name, onValueChange = { mode = mode.copy(name = it.take(24)) },
+            singleLine = true, label = { Text("모드 이름") }, modifier = Modifier.fillMaxWidth())
+        Spacer(Modifier.height(14.dp))
+        Text("사용할 설정만 켜주세요", color = Muted, fontSize = 17.sp)
+        Spacer(Modifier.height(8.dp))
+        LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             items(settingLabels.entries.toList()) { entry ->
                 val active = entry.key in mode.enabled
-                Surface(color = CardBg, shape = RoundedCornerShape(13.dp)) {
-                    Column(Modifier.fillMaxWidth().padding(horizontal = 15.dp, vertical = 10.dp)) {
+                Surface(color = Raised, shape = RoundedCornerShape(12.dp)) {
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 17.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(entry.value, modifier = Modifier.weight(1f),
-                                fontWeight = FontWeight.SemiBold)
+                            Text(entry.value, color = Dark, modifier = Modifier.weight(1f),
+                                fontWeight = FontWeight.Medium, fontSize = 21.sp)
                             Switch(checked = active, onCheckedChange = { checked ->
                                 mode = mode.copy(enabled = if (checked) mode.enabled + entry.key else mode.enabled - entry.key)
                             })
                         }
                         if (active) {
                             when (entry.key) {
-                                "temperature" -> Stepper(mode.temperature, 16, 30, "°C") { mode = mode.copy(temperature = it) }
-                                "fan" -> Stepper(mode.fan, 0, 8, "단계") { mode = mode.copy(fan = it) }
-                                "seatHeat" -> Stepper(mode.seatHeat, 0, 3, "단계") { mode = mode.copy(seatHeat = it) }
-                                "seatVent" -> Stepper(mode.seatVent, 0, 3, "단계") { mode = mode.copy(seatVent = it) }
+                                "temperature" -> ModeStepper(mode.temperature,16,30,"°C") { mode = mode.copy(temperature=it) }
+                                "fan" -> ModeStepper(mode.fan,0,8,"단계") { mode = mode.copy(fan=it) }
+                                "seatHeat" -> ModeStepper(mode.seatHeat,0,3,"단계") { mode = mode.copy(seatHeat=it) }
+                                "seatVent" -> ModeStepper(mode.seatVent,0,3,"단계") { mode = mode.copy(seatVent=it) }
                                 "ambient" -> {
-                                    Stepper(mode.lightBrightness, 0, 100, "%") { mode = mode.copy(lightBrightness = it) }
+                                    ModeStepper(mode.lightBrightness,0,100,"%") { mode = mode.copy(lightBrightness=it) }
                                     Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                                        listOf("Warm", "Blue", "Purple").forEach { c ->
-                                            FilterChip(selected = mode.lightColor == c,
-                                                onClick = { mode = mode.copy(lightColor = c) }, label = { Text(c) })
+                                        listOf("Warm", "Blue", "Purple").forEach { color ->
+                                            FilterChip(selected = mode.lightColor == color,
+                                                onClick = { mode = mode.copy(lightColor = color) },
+                                                label = { Text(color) })
                                         }
                                     }
                                 }
-                                "audio" -> OutlinedTextField(value = mode.audio, onValueChange = { mode = mode.copy(audio = it) },
-                                    label = { Text("오디오 메모 · 미디어 연동 전") }, modifier = Modifier.fillMaxWidth())
-                                else -> Text("설정값만 저장", color = Muted,
-                                    style = MaterialTheme.typography.bodySmall)
+                                "audio" -> OutlinedTextField(value = mode.audio,
+                                    onValueChange = { mode = mode.copy(audio = it) },
+                                    label = { Text("오디오 메모 · 미디어 연동 전") },
+                                    modifier = Modifier.fillMaxWidth(), singleLine = true)
+                                "window" -> ModeStepper(mode.windowPercent, 0, 100, "% 열림") {
+                                    mode = mode.copy(windowPercent = it)
+                                }
+                                "wheelHeat" -> ModeChoice(mode.wheelHeatOn, onChange = { mode = mode.copy(wheelHeatOn = it) })
+                                "defrost" -> ModeChoice(mode.defrostOn, onChange = { mode = mode.copy(defrostOn = it) })
+                                "airPurify" -> ModeChoice(mode.airPurifyOn, onChange = { mode = mode.copy(airPurifyOn = it) })
+                                "seatPosition" -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    listOf("기본", "휴식", "직립").forEach { position ->
+                                        FilterChip(selected = mode.seatPosition == position,
+                                            onClick = { mode = mode.copy(seatPosition = position) },
+                                            label = { Text(position) })
+                                    }
+                                }
+                                else -> Text("세부 설정 미지원", color = Muted, fontSize = 19.sp)
                             }
                         }
                     }
@@ -655,11 +765,11 @@ private fun EditorScreen(initial: Mode, onCancel: () -> Unit, onSave: (Mode) -> 
 }
 
 @Composable
-private fun Stepper(value: Int, min: Int, max: Int, unit: String, onChange: (Int) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("$value $unit", modifier = Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
-        OutlinedButton(onClick = { onChange((value - 1).coerceAtLeast(min)) }, enabled = value > min) { Text("−") }
-        Spacer(Modifier.width(8.dp))
-        OutlinedButton(onClick = { onChange((value + 1).coerceAtMost(max)) }, enabled = value < max) { Text("+") }
+private fun ModeChoice(checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf(true, false).forEach { v ->
+            FilterChip(selected = checked == v, onClick = { onChange(v) },
+                label = { Text(if (v) "켜짐" else "꺼짐") })
+        }
     }
 }

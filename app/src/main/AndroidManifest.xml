@@ -11,7 +11,9 @@
     <application
         android:label="N:MODE"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
-        android:allowBackup="false">
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher">
+
 
         <activity
             android:name=".MainActivity"
