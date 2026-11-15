@@ -54,6 +54,24 @@ N:MODE는 이러한 문제를 해결하기 위해 **활동 중심의 사용자 �
 - **Minimum SDK:** 28
 - **Target SDK:** 34
 
+- 
+### Test Environment
+
+- Emulator: Pleos Connect 2.1.0
+- Android Version: Android 14 (API 34)
+- Device Profile: Custom Automotive QHD
+- Screen Resolution: 2560 × 1440 (16:9)
+- CPU: 4 cores
+- RAM: 2 GB
+- VM Heap: 80 MB
+- Graphics Acceleration: Automatic
+- Vehicle SDK: Pleos Vehicle SDK 2.3.2
+
+본 앱은 Pleos Connect 에뮬레이터에서 테스트했습니다.
+모드 생성·선택·편집·저장 기능과 차량 공조 상태 조회를 구현했으며,
+실제 차량 환경 제어는 지원하지 않습니다.
+
+
 ## 5. Installation
 
 ### Download APK
