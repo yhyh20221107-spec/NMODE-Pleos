@@ -93,11 +93,17 @@ Debug와 Release 빌드는 서로 다른 Application ID를 사용합니다.
 - Release: `com.cabinmix.app`
 - Debug: `com.cabinmix.app.debug`
 
+
 ## 7. Demonstration Video
 
-시연 영상: 추후 링크 추가
+**[N:MODE 앱 시연 영상 보기 (YouTube)](https://youtu.be/rcmPeP6iv_Q)**
 
-시연 영상에서는 사용자 정의 모드 생성, 편집, 차량 상태 조회 및 모드 미리보기 과정을 확인할 수 있습니다.
+[![N:MODE 시연 영상](https://img.youtube.com/vi/rcmPeP6iv_Q/maxresdefault.jpg)](https://youtu.be/rcmPeP6iv_Q)
+
+시연 영상에서는 기본 모드 탐색, 모드 선택, 사용자 정의 모드 생성 및 편집, 차량 상태 조회와 미리보기 기능을 확인할 수 있습니다.
+
+※ 본 시연은 Pleos Connect 에뮬레이터에서 진행했으며, 실제 차량 환경 제어는 수행하지 않습니다.
+
 
 ## 8. Project Status
 
