@@ -58,7 +58,8 @@ N:MODE는 이러한 문제를 해결하기 위해 **활동 중심의 사용자 �
 
 ### Download APK
 
-[Download N:MODE Release APK](./apk/NMODE-release.apk)
+[Download N:MODE Release APK](apk/김가람_NMODE_release.apk)
+
 
 ### Requirements
 
@@ -73,7 +74,7 @@ N:MODE는 이러한 문제를 해결하기 위해 **활동 중심의 사용자 �
 3. ADB를 이용해 APK를 설치합니다.
 
 ```bash
-adb install NMODE-release.apk
+adb install 김가람_NMODE_release.apk
 ```
 
 4. 에뮬레이터에서 N:MODE 앱을 실행합니다.
